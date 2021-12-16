@@ -1,0 +1,5 @@
+name: rcorrector-env
+channels:
+  - bioconda
+dependencies:
+  - rcorrector=1.0.4

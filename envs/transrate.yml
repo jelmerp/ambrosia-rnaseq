@@ -1,0 +1,6 @@
+name: transrate-env
+channels:
+  - bioconda
+dependencies:
+  - transrate=1.0.3
+  - snap-aligner=1.0dev.96
