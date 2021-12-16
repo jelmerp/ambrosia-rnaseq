@@ -1,0 +1,22 @@
+Fusarium euwallacea	NCBI	NHTE00000000.2
+Fusarium temperatum	NCBI	GCA_001513835.1
+Ceratocystis eucalypticola	NCBI	GCA_001513815.1
+Ceratocystis platani	NCBI	GCA_000978885.1
+Thielaviopsis musarum	NCBI	GCA_001513885.1
+Thielaviopsis punctulata	NCBI	GCA_000968615.1
+Acremonium alcalophilum	JGI	1184963
+Microascus trigonosporus	JGI	1015502
+Ambrosiella xylebori	SRA	SRR5865576                #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Candida sp.	NCBI	GCA_001950555.1
+Ceratocystiopsis brevicomi	SRA	SRR5865566            #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Fragosphaeria purpea	SRA	SRR5865573                #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Grosmannia penicillata	SRA	SRR5865574                #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Meyerozyma caribbica	NCBI	GCA_000755205.1
+Raffaelea albimanens	SRA	SRR5865580                #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Raffaelea ambrosiae	SRA	SRR5865577                    #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Raffaelea arxii	SRA	SRR5865578                        #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Raffaelea lauricola	SRA	SRR5865575                    #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Raffaelea sp	SRA	SRR5865582                        #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Raffaelea sulphurea	SRA	SRR5865581                    #> Part of https://www.ncbi.nlm.nih.gov/bioproject/PRJNA395605, should download those assemblies
+Saccharomycopsis fibuligera	SRA	SRR3598378            #> Has full genome available (GCA_001936155.1), use instead (https://www.ncbi.nlm.nih.gov/genome/51703?genome_assembly_id=299127)
+Saccharomycopsis malangia	SRA	DRR032483             #> Has full genome available (GCA_004014935.1), use instead (https://www.ncbi.nlm.nih.gov/assembly/?term=txid44092[Organism:noexp])
