@@ -1,0 +1,14 @@
+name: trinotate-env
+channels:
+  - bioconda
+dependencies:
+  - trinotate=3.2.2
+  - transdecoder=5.5.0
+  - perl-uri=1.76
+  - perl-xml-simple
+
+## Additional dependencies manually installed:
+# SignalP - https://services.healthtech.dtu.dk/service.php?SignalP-5.0
+# TMHMM - https://services.healthtech.dtu.dk/service.php?TMHMM-2.0
+# RNAmmer (& old version of hmmer) - https://services.healthtech.dtu.dk/service.php?RNAmmer-1.2
+# For details, see https://github.com/Trinotate/Trinotate.github.io/wiki/Software-installation-and-data-required

@@ -1,0 +1,5 @@
+name: bowtie2-env
+channels:
+  - bioconda
+dependencies:
+  - bowtie2=2.4.4

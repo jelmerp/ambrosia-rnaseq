@@ -1,0 +1,5 @@
+name: dammit-env
+channels:
+  - bioconda
+dependencies:
+  - dammit=1.2
