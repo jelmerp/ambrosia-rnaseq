@@ -1,8 +1,9 @@
 ## Scripts
-scr_mqc=mcic-scripts/misc/fastqc.sh
-scr_trimg=mcic-scripts/misc/trimgalore.sh
+scr_mqc=mcic-scripts/qc/fastqc.sh
+scr_trimg=mcic-scripts/trim/trimgalore.sh
 scr_idx=mcic-scripts/rnaseq/star_index.sh
 scr_aln=mcic-scripts/rnaseq/star_align.sh
+bin=mcic-scripts/trans-assembly
 
 ## Data and results
 dir_scratch=/fs/scratch/PAS0471/jelmer/assist/2021-09_nisha
@@ -49,7 +50,6 @@ minlen=36            # Min. read length for TrimGalore trimming - follows https:
 mapmax_fun=100       # Max. nr of multimapping for fungal (pre-)mapping
 
 config_trinotate=$PWD/workflow/config/trinotate_conf.txt
-
 
 # PREPROCESSING ----------------------------------------------------------------
 ## Run FastQC
@@ -101,29 +101,32 @@ done
 bash scripts/readstats.sh "$dir_trim" "$dir_map2fun" "$dir_map2ambrox" "$readstats"
 
 
-# BEETLE TRANSCRIPTOME ASSEMBLY ------------------------------------------------
+# TRANSCRIPTOME ASSEMBLY ------------------------------------------------
 ## Assemble with Trinity
-sbatch scripts/trinity.sh "$dir_map2fun"/rcorr/unmapped "$dir_trinity_scratch"
+sbatch "$bin"/trinity.sh "$dir_map2fun"/rcorr/unmapped "$dir_trinity_scratch"
 cp "$dir_trinity_scratch"/Trinity.fasta "$dir_trinity"
 
-## Redundant transcript removal
-sbatch scripts/cd-hit.sh $dir_trinity/Trinity.fasta "$assembly"
+## Redundant transcript removal with CD-HIT
+sbatch "$bin"/cd-hit.sh $dir_trinity/Trinity.fasta "$assembly"
 
 
-# BEETLE ASSEMBLY QC -----------------------------------------------------------
+# ASSEMBLY QC -----------------------------------------------------------
 ## Run Trinity-stats
+conda activate /users/PAS0471/jelmer/miniconda3/envs/trinotate-env
 TrinityStats.pl $dir_trinity/Trinity.fasta > "$dir_trinity"/Trinity_assembly.metrics
-
-## rnaQUAST
-sbatch scripts/rnaquast.sh "$assembly" "$dir_rnaquast"
 
 ## Run BUSCO
 busco_db=insecta_odb10
-sbatch scripts/busco.sh "$assembly" "$dir_busco" "$busco_db"
+sbatch "$bin"/busco.sh "$assembly" "$dir_busco" "$busco_db"
 mv busco_*log "$dir_busco"; mv busco_downloads "$dir_busco"
 
-## Run Detonate
-sbatch scripts/detonate.sh "$assembly" "$dir_trim"/rcorr "$dir_detonate"
+## rnaQUAST
+sbatch "$bin"/rnaquast.sh "$assembly" "$dir_rnaquast"
+
+## Run Detonate (Note: also tried TransRate but couldn't get it to work)
+sbatch "$bin"/detonate.sh "$assembly" "$dir_trim"/rcorr "$dir_detonate"
+
+#? Try Bellerophon (again?)
 
 ## Quantify read support by mapping with Bowtie - https://informatics.fas.harvard.edu/best-practices-for-de-novo-transcriptome-assembly-with-trinity.html
 #> https://github.com/trinityrnaseq/trinityrnaseq/wiki/RNA-Seq-Read-Representation-by-Trinity-Assembly
@@ -135,17 +138,26 @@ sbatch scripts/detonate.sh "$assembly" "$dir_trim"/rcorr "$dir_detonate"
 #> https://github.com/trinityrnaseq/trinityrnaseq/wiki/Counting-Full-Length-Trinity-Transcripts
 
 
-# BEETLE ASSEMBLY FILTERING ----------------------------------------------------
+# ASSEMBLY FILTERING ----------------------------------------------------
 ## - Another round of fungal sequence removal? See https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6463014/, which used competitive BlastP
 ## - Can try TPM>1 filter using Detonate results, as in [Error, noise and bias in de novo transcriptome assemblies](https://onlinelibrary.wiley.com/doi/10.1111/1755-0998.13156)
 ## - Can try BlastP evalue < 1e-5 as in [Error, noise and bias in de novo transcriptome assemblies](https://onlinelibrary.wiley.com/doi/10.1111/1755-0998.13156)
 ## - Try DRAP? http://www.sigenae.org/drap/install.html
 
+## Check for contamination with Kraken2
+kraken_db=/fs/project/PAS0471/jelmer/refdata/kraken/PlusPFP/
+kraken_script=mcic-scripts/metagenomics/kraken-run.sh
+sbatch "$kraken_script" -i "$dir_trinity"/Trinity.fasta -d "$kraken_db" -o results/kraken/trinity
 
-# BEETLE ASSEMBLY ANNOTATION ---------------------------------------------------
+fq=data/fastq/EMySc1_S23_L002_R1_001.fastq.gz
+sbatch "$kraken_script" -i "$fq" -d "$kraken_db" -o results/kraken/fastq
+
+
+# ASSEMBLY ANNOTATION ---------------------------------------------------
 #? Try dammit? https://angus.readthedocs.io/en/2017/dammit_annotation.html#
 
-sbatch scripts/trinotate.sh "$assembly" "$config_trinotate" "$dir_trinotate"
+## Trinotate
+sbatch $bin/trinotate.sh "$assembly" "$config_trinotate" "$dir_trinotate"
 
 
 # GENE AND TRANSCRIPT QUANTIFICATION -------------------------------------------
@@ -162,8 +174,9 @@ done
 #> namely (1) Bowtie2 (ver. 2.3.0)38 (–dpad 0–gbar 99999999–mp 1,1–np 1–score-min L,0,-0,1 -k 200–sensitive–no-mixed–no-discordant) followed by RSEM (ver. 1.2.31) (default parameters);
 #> (2) Kallisto (ver. 0.43.0) (indexing with -k 31 and quantifying with default parameters); and (3) Salmon (ver. 0.8.2) (indexing with -k 31 and quantifying with default parameters).
 
-# DIFFERENTIAL EXPRESSION ------------------------------------------------------
 
+# DIFFERENTIAL EXPRESSION ------------------------------------------------------
+sbatch scripts/tximport.R
 ## Gene-to-transcript map: results/trinotate/GENE_TRANS_MAP
 
 #? Try Ballgown? https://www.bioconductor.org/packages/devel/bioc/vignettes/ballgown/inst/doc/ballgown.html
@@ -171,10 +184,4 @@ done
 
 #TODO
 #> https://link.springer.com/protocol/10.1007%2F978-1-0716-1609-3_8#Sec6
-
-# ASSEMBLE AMBROSIELLA TRANSCRIPTOME -------------------------------------------
-## Assemble
-#> https://github.com/trinityrnaseq/trinityrnaseq/wiki/Running-Trinity
-#> If your transcriptome RNA-seq data are derived from a gene-dense compact genome, such as from fungal genomes,
-#> where transcripts may often overlap in UTR regions, you can minimize fusion transcripts by leveraging the '--jaccard_clip' option if you have paired reads. 
 

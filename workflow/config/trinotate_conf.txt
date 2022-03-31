@@ -16,8 +16,9 @@ BLASTP_PROG=blastp
 SIGNALP_PROG=signalp
 TMHMM_PROG=tmhmm
 RNAMMER_TRANS_PROG=RnammerTranscriptome.pl
-RNAMMER=~/miniconda3/envs/trinotate-env/bin/rnammer
+RNAMMER=/users/PAS0471/jelmer/miniconda3/envs/trinotate-env/bin/rnammer
 HMMSCAN_PROG=hmmscan
+TRINOTATE_HOME=/users/PAS0471/jelmer/miniconda3/envs/trinotate-env/bin/
 
 # dbs
 SWISSPROT_PEP=uniprot_sprot.pep

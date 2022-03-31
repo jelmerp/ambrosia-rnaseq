@@ -1,8 +1,11 @@
-## Transfer files
-# rsync -avz jp:/fs/project/PAS0471/jelmer/assist/2021-09_nisha/results /home/jelmer/Dropbox/mcic/assist/2021-09_nisha
-# rsync -avz jp:/fs/project/PAS0471/jelmer/assist/2021-09_nisha/results/kallisto /home/jelmer/Dropbox/mcic/assist/2021-09_nisha/results
-# rsync -avz jp:/fs/project/PAS0471/jelmer/assist/2021-09_nisha/results/trinotate/GENE_TRANS_MAP /home/jelmer/Dropbox/mcic/assist/2021-09_nisha/results/trinotate/
-# rsync -avz /home/jelmer/Dropbox/mcic/assist/2021-09_nisha/refdata/*gz jp:/fs/project/PAS0471/jelmer/assist/2021-09_nisha/refdata
+# DATA AND REF DATA ------------------------------------------------------------
+## Download the FASTQ files from the NCSU sequencing core website
+dir_fq=data/fastq
+sbatch scripts/download_fastq.sh "$dir_fq"
+
+## Download the Ambrosiella cleistominuta reference genome
+URL=https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/017/139/545/GCA_017139545.1_ASM1713954v1/GCA_017139545.1_ASM1713954v1_genomic.fna.gz
+wget "$URL" -P results/refdata/ambro_cleistominuta/
 
 
 # SOFTWARE ---------------------------------------------------------------------
@@ -40,24 +43,3 @@ mv src/hmmsearch src/hmmsearch2
 env_dir=/users/PAS0471/jelmer/miniconda3/envs/trinotate-env
 mkdir "$env_dir"/bin/util/
 cp "$env_dir"/bin/superScaffoldGenerator.pl "$env_dir"/bin/util/  # Trinotate will look for it in util
-
-
-# DATA AND REF DATA ------------------------------------------------------------
-## Download the FASTQ files from the NCSU sequencing core website
-dir_fq=data/fastq
-URL=http://lennon.gnets.ncsu.edu/Patwa/Patwa_NVS112A_fastqfiles.tar
-sbatch scripts/download_fastq.sh $URL "$dir_fq"
-
-tar -xvf "$dir_fq"/"$(basename "$URL")" "$dir_fq"
-mv "$dir_fq"/Patwa_fastqfiles/* "$dir_fq"
-rmdir "$dir_fq"/Patwa_fastqfiles
-
-## Download the Ambrosiella cleistominuta reference genome
-URL=https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/017/139/545/GCA_017139545.1_ASM1713954v1/GCA_017139545.1_ASM1713954v1_genomic.fna.gz
-wget "$URL" -P results/refdata/ambro_cleistominuta/
-
-
-# DOCS -------------------------------------------------------------------------
-## Assembly
-#? https://informatics.fas.harvard.edu/best-practices-for-de-novo-transcriptome-assembly-with-trinity.html
-#? https://www.protocols.io/view/de-novo-transcriptome-assembly-workflow-ghebt3e
