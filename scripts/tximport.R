@@ -1,5 +1,10 @@
 #!/usr/bin/env Rscript
 
+#SBATCH --account=PAS0471
+#SBATCH --time=15
+#SBATCH --output=slurm-tximport-%j.out
+
+
 # SET-UP -----------------------------------------------------------------------
 message("\n## Starting script tximport.R")
 Sys.time()
@@ -29,8 +34,6 @@ sampleid_column <- "id_short"  # Column in metadata with desired sample names
 
 # PROCESS METADATA AND KALLISTO COUNTS -----------------------------------------
 ## Read metadata
-test_col <- "test"
-
 meta <- read.delim(meta_file) %>% arrange(.data[[sampleid_column]])
 rownames(meta) <- meta[[sampleid_column]]
 
