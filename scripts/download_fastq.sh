@@ -13,15 +13,23 @@ echo "## Starting download..."
 date
 
 ## Variables
-URL=$1
-outdir=$2
+outdir=$1
+
+## Constants
+URL=http://lennon.gnets.ncsu.edu/Patwa/Patwa_NVS112A_fastqfiles.tar
+PASSWORD=cSArtpVF
+USERNAME=patwa
 
 ## Create the output dir
 mkdir -p "$outdir"
 
 ## Download
-### Using the username and password sent to us by the NCSU staff
-wget --user patwa --password cSArtpVF -P "$outdir" "$URL"
+wget --user "$USERNAME" --password "$PASSWORD" -P "$outdir" "$URL"
+
+## Extract
+tar -xvf "$outdir"/"$(basename "$URL")" "$outdir"
+mv "$outdir"/Patwa_fastqfiles/* "$outdir"
+rmdir "$outdir"/Patwa_fastqfiles
 
 ## Report
 echo "## Done"
