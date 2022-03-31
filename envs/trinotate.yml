@@ -12,3 +12,18 @@ dependencies:
 # TMHMM - https://services.healthtech.dtu.dk/service.php?TMHMM-2.0
 # RNAmmer (& old version of hmmer) - https://services.healthtech.dtu.dk/service.php?RNAmmer-1.2
 # For details, see https://github.com/Trinotate/Trinotate.github.io/wiki/Software-installation-and-data-required
+
+#! Fix to Conda env -- inside env dir, cp this Perl script into the `util` dir, because that's where it's looked for:
+# cp bin/rnammer_supperscaffold_gff_to_indiv_transcripts.pl bin/util/
+# cp bin/extract_GO_assignments_from_Trinotate_xls.pl bin/util/
+
+# ls /users/PAS0471/jelmer/miniconda3/envs/trinotate-env/bin/autoTrinotate.pl
+# Change line 78 from:
+# $globals{TRINOTATE_HOME} = $FindBin::RealBin . "/../";
+# to:
+# $globals{TRINOTATE_HOME} = $FindBin::RealBin;
+
+# mkdir /users/PAS0471/jelmer/miniconda3/envs/trinotate-env/lib/site_perl/5.26.2/x86_64-linux-thread-multi/obo
+# cp software/Trinotate/PerlLib/obo/go-basic.obo.gz /users/PAS0471/jelmer/miniconda3/envs/trinotate-env/lib/site_perl/5.26.2/x86_64-linux-thread-multi/obo
+
+# cp -r software/Trinotate/util/* /users/PAS0471/jelmer/miniconda3/envs/trinotate-env/bin/util/
