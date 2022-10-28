@@ -1,5 +1,5 @@
 slurm-*
-data/
+data/fastq
 results/
 sandbox/
 software/
