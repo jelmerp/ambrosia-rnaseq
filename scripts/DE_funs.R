@@ -1,15 +1,12 @@
 ## Get DE results
-get_DE <- function(comp, dds, count_df,
+extract_DE <- function(comp, dds, count_df,
                    annot = NULL, sig_only = FALSE,
                    p_tres = 0.05, mean_tres = 1, lfc_tres = 0.5) {
 
   ## Get DEseq results
-  res <- results(dds, contrast = c("tissue", comp))
-
-  res <- res %>%
+  res <- results(dds, contrast = c("tissue", comp)) %>%
     as.data.frame() %>%
     rownames_to_column("gene_id") %>%
-    dplyr::rename(lfc = log2FoldChange) %>%
     mutate(group1 = comp[1],
            group2 = comp[2],
            contrast = paste0(comp, collapse = "_")) %>%
@@ -20,7 +17,7 @@ get_DE <- function(comp, dds, count_df,
   fcount_df <- count_df %>%
       filter(tissue %in% comp) %>%
       group_by(gene_id, tissue) %>%
-      summarize(mean = mean(count)) %>%
+      summarize(mean = mean(count), .groups = "drop") %>%
       pivot_wider(id_cols = gene_id, values_from = mean, names_from = tissue)
   colnames(fcount_df)[2:3] <- c("mean_A", "mean_B")
   fcount_df <- fcount_df %>% mutate(mean = (mean_A + mean_B) / 2)
@@ -28,11 +25,13 @@ get_DE <- function(comp, dds, count_df,
 
   ## Determine whether a gene is DE
   res <- res %>% mutate(
-    isDE = ifelse(padj < p_tres & abs(lfc) > lfc_tres & (mean_A > mean_tres | mean_B > mean_tres),
-                  TRUE, FALSE)
+    isDE = ifelse(
+      padj < p_tres & abs(log2FoldChange) > lfc_tres & (mean_A > mean_tres | mean_B > mean_tres),
+      TRUE, FALSE)
     )
+
   nsig <- sum(res$isDE, na.rm = TRUE)
-  message(comp[1], " vs ", comp[2], " - Nr signif.: ", nsig)
+  message(comp[1], " vs ", comp[2], " - Nr DEGs: ", nsig)
 
   ## Only take significant genes
   if (sig_only == TRUE) res <- res %>% filter(isDE == TRUE)
@@ -40,8 +39,8 @@ get_DE <- function(comp, dds, count_df,
   ## Add gene annotation
   if (!is.null(annot)) {
     res <- res %>%
-      left_join(annot %>% select(gene_id, gene_name, description),
-                res, by = "gene_id") %>%
+      left_join(select(annot, gene_id, gene_name, description), res,
+                by = "gene_id") %>%
       arrange(padj)
   }
 
@@ -51,27 +50,38 @@ get_DE <- function(comp, dds, count_df,
 ## Volcano plot
 pvolc <- function(DE_df,
                   sig_only = TRUE,
-                  fcontrast = NULL,
+                  contrast = NULL,
                   cols = NULL,
-                  interactive = FALSE) {
+                  interactive = FALSE,
+                  facet_scales = "fixed") {
 
+  fcontrast <- contrast
+
+  ## Remove genes with NE as the pvalue
   DE_df <- DE_df %>% filter(!is.na(padj))
 
-  if (sig_only == TRUE) DE_df <- DE_df %>% filter(isDE == TRUE)
+  #if (sig_only == TRUE) DE_df <- DE_df %>% filter(isDE == TRUE)
   if (!is.null(fcontrast)) DE_df <- DE_df %>% filter(contrast %in% fcontrast)
 
   p <- ggplot(DE_df) +
-    aes(x = lfc, y = -log10(padj), color = contrast,
+    aes(x = log2FoldChange,
+        y = -log10(padj),
         text = glue("Trinity gene ID: {gene_id}
                     Gene name: {gene_name}
                     Description: {description}")) +
-    geom_point() +
+    geom_point(data = filter(DE_df, isDE == FALSE),
+               fill = "grey80",
+               size = 3, shape = 21, color = "grey20") +
+    geom_point(data = filter(DE_df, isDE == TRUE),
+               aes(fill = contrast),
+               size = 3, shape = 21, color = "grey20") +
     geom_vline(xintercept = 0, color = "grey30") +
     scale_x_continuous(expand = expansion(mult = c(0.02, 0.02))) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.02))) +
-    labs(x = "Log-fold change (>0: 1st treatment has higher counts)",
-         y = "-log10(adjusted p-value)") +
-    guides(color = "none")
+    labs(x = "Log2-fold change",
+         y = "-Log10(adjusted p-value)") +
+    guides(fill = "none") +
+    theme(panel.grid.minor = element_blank())
 
   if (is.null(cols)) {
     p <- p + scale_color_brewer(palette = "Dark2")
@@ -80,19 +90,25 @@ pvolc <- function(DE_df,
   }
 
   ## When no focal contrast is specified, show all with a facet
-  if (is.null(fcontrast)) p <- p + facet_wrap(vars(contrast))
+  if (is.null(fcontrast)) {
+    p <- p + facet_wrap(vars(contrast), nrow = 1, scales = facet_scales)
+  }
 
   if (interactive == TRUE) ggplotly(p, tooltip = "text") else print(p)
+
+  return(p)
 }
 
 
 ## Function to provide shrunken LFC estimates
-shrink_lfc <- function(dds, fac, comp, lfc_threshold = 1) {
+shrink_lfc <- function(dds, fac, comp,
+                       s_threshold = 0.005,
+                       lfc_threshold = 1) {
 
   coef <- paste0(fac, "_", paste0(comp, collapse = "_vs_"))
   message("\nCoefficient: ", coef)
 
-  if(! coef %in% resultsNames(dds)) {
+  if (!coef %in% resultsNames(dds)) {
     ## For a comparison not in resultsNames
     dds[[fac]] <- relevel(dds[[fac]], ref = comp[2])
     design(dds) <- as.formula(paste("~", fac))
@@ -104,13 +120,15 @@ shrink_lfc <- function(dds, fac, comp, lfc_threshold = 1) {
                    type = "apeglm",
                    lfcThreshold = lfc_threshold) %>%
     as.data.frame() %>%
-    rownames_to_column("ID") %>%
-    dplyr::rename(mean = baseMean,
-                  lfc = log2FoldChange) %>%
+    rownames_to_column("gene_id") %>%
+    dplyr::rename(mean = baseMean) %>%
     mutate(group1 = comp[1],
            group2 = comp[2],
            contrast = paste0(comp, collapse = "_"),
-           isDE = ifelse(svalue < 0.005, TRUE, FALSE))
+           isDE = ifelse(svalue < s_threshold, TRUE, FALSE))
+
+  nsig <- sum(res$isDE, na.rm = TRUE)
+  message(comp[1], " vs ", comp[2], " - Nr DEGs: ", nsig)
 
   return(res)
 }
@@ -126,7 +144,7 @@ pMA <- function(df,
   if (rm_padj_na == TRUE) df <- df %>% filter(!is.na(padj))
 
   p <- ggplot(df) +
-    aes(x = mean, y = lfc, color = isDE,
+    aes(x = mean, y = log2FoldChange, color = isDE,
         text = glue("Trinity gene ID: {gene_id}
                     Gene name: {gene_name}
                     Description: {description}")) +
@@ -197,6 +215,7 @@ pheat <- function(IDs, count_mat, meta_df,
 pbox <- function(ID, count_df,
                  annot = NULL, cols = NULL,
                  x_by = "tissue", col_by = "tissue",
+                 log_scale = FALSE,
                  printplot = TRUE, theme_base_size = 13) {
 
   if (!is.null(annot)) {
@@ -209,7 +228,7 @@ pbox <- function(ID, count_df,
       filter(gene_id == ID) %>%
       pull(gene_name)
 
-    psub <- paste0(g_descrip, "\n", ID)
+    psub <- paste0(str_trunc(g_descrip, width = 30), "\n", ID)
     ptitle <- g_name
   } else {
     ptitle <- ID
@@ -221,22 +240,32 @@ pbox <- function(ID, count_df,
   p <- ggplot(count_df) +
     aes(y = count, x = .data[[x_by]], color = .data[[x_by]]) +
     geom_boxplot(outlier.shape = NA) +
-    geom_point(position = position_jitter(w = 0.15, h = 0),
+    geom_point(position = position_jitter(width = 0.15, height = 0),
                size = 1.5) +
-    scale_y_continuous(labels = scales::comma,
-                       expand = expansion(mult = c(0.001, 0.2))) +
     labs(title = ptitle,
          subtitle = psub,
-         x = NULL,
-         y = "Normalized count") +
+         x = NULL) +
     guides(color = "none") +
     theme_bw(base_size = theme_base_size) +
     theme(legend.position = "right",
-          plot.title = element_text(hjust = 0.5, face = "bold.italic"),
-          plot.subtitle = element_text(hjust = 0.5, face = "plain"),
+          plot.title = element_text(hjust = 0.5, face = "bold.italic",
+                                    size = 12),
+          plot.subtitle = element_text(hjust = 0.5, face = "plain",
+                                       size = 10),
           panel.grid.major.x = element_blank(),
           panel.grid.minor.y = element_blank(),
           plot.margin = unit(c(0.5, 0.5, 1, 0.5), "cm"))
+
+  if (log_scale == TRUE) {
+    p <- p +
+      scale_y_log10(labels = scales::comma) +
+      labs(y = "Log10 of normalized count")
+  } else {
+    p <- p +
+      scale_y_continuous(labels = scales::comma,
+                         expand = expansion(mult = c(0.001, 0.2))) +
+      labs(y = "Normalized count")
+  }
 
   if (is.null(cols)) {
     p <- p + scale_color_brewer(palette = "Set1")
@@ -249,29 +278,28 @@ pbox <- function(ID, count_df,
 
 p4box <- function(IDs, count_df,
                   annot = NULL, cols = NULL,
-                  x_by = "tissue", col_by = "tissue") {
+                  x_by = "tissue", col_by = "tissue", ...) {
 
   p1 <- pbox(IDs[1], count_df, annot, cols,
-             printplot = FALSE, theme_base_size = 10) +
-    theme(axis.title.x = element_blank())
-          #axis.title.y = element_text(size = 11),
-          #plot.title = element_text(size = 11))
+             printplot = FALSE, theme_base_size = 11, ...) +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          plot.margin = margin(5.5, 1, 5.5, 5.5, "pt"))
 
   p2 <- pbox(IDs[2], count_df, annot, cols,
-             printplot = FALSE, theme_base_size = 10) +
-    theme(axis.title = element_blank())
-          #plot.title = element_text(size = 11))
+             printplot = FALSE, theme_base_size = 11, ...) +
+    theme(axis.title = element_blank(),
+          axis.text.x = element_blank(),
+          plot.margin = margin(5.5, 1, 5.5, 5.5, "pt"))
 
   p3 <- pbox(IDs[3], count_df, annot, cols,
-             printplot = FALSE, theme_base_size = 10)
-    #theme(axis.title = element_text(size = 11),
-    #      plot.title = element_text(size = 11))
+             printplot = FALSE, theme_base_size = 11, ...) +
+    theme(plot.margin = margin(5.5, 1, 5.5, 5.5, "pt"))
 
   p4 <- pbox(IDs[4], count_df, annot, cols,
-             printplot = FALSE, theme_base_size = 10) +
-    theme(axis.title.y = element_blank())
-          #axis.title.x = element_text(size = 11),
-          #plot.title = element_text(size = 11))
+             printplot = FALSE, theme_base_size = 11, ...) +
+    theme(axis.title.y = element_blank(),
+          plot.margin = margin(5.5, 1, 5.5, 5.5, "pt"))
 
   p <- (p1 + p2) / (p3 + p4)
   print(p)

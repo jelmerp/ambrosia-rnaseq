@@ -21,7 +21,7 @@ pacman::p_load(char = packages, install = TRUE)
 
 ## Input dirs and files
 kallisto_dir <- here("results/kallisto/beetle")
-meta_file <- here("metadata/samples.txt")
+meta_file <- here("data/meta/samples.txt")
 transmap_file <- here("results/trinotate/GENE_TRANS_MAP")
 
 ## Output file
