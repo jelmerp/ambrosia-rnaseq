@@ -1,0 +1,642 @@
+---
+title: |
+  | _Ambrosia_ beetle RNA-seq --
+  | Results for the manuscript
+pagetitle: "Ambrosia RNA-seq ms"
+author: "Jelmer Poelstra (poelstra.1@osu.edu), MCIC Wooster, OSU"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: cerulean
+    highlight: kate
+    toc: true
+    toc_float: true
+    fig_caption: true
+    anchor_sections: true
+    df_print: kable
+    css: html_page.css
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  eval = TRUE,
+  cache = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  out.width = "80%"
+)
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+```{r}
+## Load packages
+if (!"pacman" %in% installed.packages()) install.packages("pacman")
+if (!"BiocManager" %in% installed.packages()) install.packages("BiocManager")
+if (!"DESeq2" %in% installed.packages()) BiocManager::install("DESeq2")
+packages <- c("tidyverse", "DESeq2",
+              "glue", "here", 
+              "pheatmap", "ggrepel", "ggvenn", "patchwork", 
+              "RColorBrewer", "colorspace",
+              "DT", "kableExtra")
+pacman::p_load(char = packages, install = TRUE)
+```
+
+```{r}
+## Source script with functions
+source(here("scripts/DE_funs.R"))
+source(here("mcic-scripts/rnaseq/rfuns/enrich_funs.R"))
+source(here("scripts/report_funs.R"))
+```
+
+```{r}
+## Define input files
+dds_file <- here("results/DE/dds_insect_preDE.rds")
+DE_file <- here("results/DE/DE_insectgenes.tsv")
+GO_file <- here("results/GO/GO_insectgenes.tsv")
+annot_file <- here("results/trinotate/blast_res.txt")
+```
+
+```{r}
+## Define output files
+plotfile_pca <- here("results/ms_figs/PCA.png")
+plotfile_heat_hiexpr <- here("results/ms_figs/heatmap_hi-expr.png")
+plotfile_venn_all <- here("results/ms_figs/venn_allDE.png")
+plotfile_venn50 <- here("results/ms_figs/venn_top50DE.png")
+plotfile_volc <- here("results/ms_figs/volcano.png")
+plotfile_heat_top50DE <- here("results/ms_figs/heatmap_top50DE.png")
+plotfile_box <- here("results/ms_figs/boxplots.png")
+plotfile_go <- here("results/ms_figs/GO_up.png")
+```
+
+```{r}
+# Settings
+
+## Focal factor
+focal_fct <- "tissue"
+tissue_levels <- c("DM+S", "IM+S", "IM")
+complist <- list(c("DM+S", "IM+S"), c("DM+S", "IM"), c("IM+S", "IM"))
+compvec <- map_chr(complist, function(x) paste0(x, collapse = " v. "))
+
+## Plot settings
+theme_set(theme_bw(base_size = 14))
+
+## Tissue and contrast colors
+tissue_colors <- qualitative_hcl(length(tissue_levels), palette = "Dark 3")
+names(tissue_colors) <- tissue_levels
+compcols <- brewer.pal(length(compvec), name = "Dark2")
+
+## Color list for heatmaps
+tissue_colors_list <- list(tissue_colors)
+names(tissue_colors_list) <- focal_fct
+```
+
+```{r}
+# Load and prepare input data
+
+## Load annotation data
+annot <- read_tsv(annot_file, show_col_types = FALSE)
+
+## Load DESeq object
+dds <- readRDS(dds_file)
+
+## Load DE results
+DE_res <- read_tsv(DE_file, show_col_types = FALSE) %>%
+  mutate(contrast = factor(contrast, levels = compvec))
+
+## Load GO results
+GO_res <- read_tsv(GO_file, show_col_types = FALSE) %>%
+  mutate(contrast = factor(contrast, levels = compvec),
+         description = str_to_title(description))
+
+## Extract metadata
+meta <- colData(dds) %>%
+  as.data.frame() %>%
+  select(-tissue) %>%
+  dplyr::rename(tissue = tissue_plot)
+```
+
+```{r}
+## Get normalized count matrix
+dds <- estimateSizeFactors(dds)
+counts_raw <- dds@assays@data$counts
+count_mat <- sweep(counts_raw, 2, sizeFactors(dds), "/")
+
+## Get a long-format count df with metadata
+count_df <- as.data.frame(count_mat) %>%
+  rownames_to_column("gene_id") %>%
+  pivot_longer(-gene_id, names_to = "id_short", values_to = "count") %>%
+  left_join(meta, by = "id_short")
+
+## Mean counts
+mean_df <- count_df %>%
+  group_by(gene_id, tissue) %>%
+  summarize(mean = mean(count), .groups = "drop") %>%
+  pivot_wider(id_cols = gene_id, values_from = mean,
+              names_from = tissue, names_prefix = "mean_")
+```
+
+```{r}
+## Comparing DE across tissues
+DE_combs <- DE_res %>%
+  filter(isDE == TRUE) %>% 
+  select(gene_id, lfc = log2FoldChange,
+         padj, contrast, gene_name, description) %>%
+  left_join(mean_df, by = "gene_id") %>%
+  pivot_wider(values_from = c(padj, lfc), names_from = contrast)
+```
+
+```{r}
+## Function to get (top) DEGs
+extract_DEGs <- function(DE_res, fcontrast, top_n = Inf) {
+  filter(DE_res, contrast == fcontrast, isDE == TRUE) %>%
+    arrange(padj) %>% 
+    pull(gene_id) %>%
+    head(top_n)
+}
+```
+
+<br>
+
+----
+
+- Inflated mycangium -- `IM`
+- Inflated Mycanguim + Scutellum -- `IM+S`
+- Deflated Mycangium + Scutellum -- `DM+S`
+  
+----
+
+## PCA {.tabset .tabset-fade .tabset-pills}
+
+<br>
+
+```{r}
+pca_res <- plotPCA(varianceStabilizingTransformation(dds, blind = TRUE),
+                   intgroup = "tissue_plot", returnData = TRUE)
+pct_var <- round(100 * attr(pca_res, "percentVar"), 2)
+
+ggplot(pca_res) +
+  aes(x = PC1, y = PC2, fill = tissue_plot) +
+  geom_point(size = 5, shape = 21, color = "grey20") +
+  scale_fill_manual(values = tissue_colors) +
+  labs(fill = "tissue",
+       x = paste0("PC1: ", pct_var[1], "% of variance"),
+       y = paste0("PC2: ", pct_var[2], "% of variance")) +
+  theme(aspect.ratio = pct_var[2] / pct_var[1],
+        panel.grid.minor = element_blank(),
+        legend.position = "top")
+
+ggsave(plotfile_pca, width = 7, height = 4)
+```
+
+<br>
+
+----
+
+## DEG summaries
+
+Out of `r nrow(count_mat)` genes, the following numbers are significantly
+differentially expressed (adjusted p-value < 0.05) for each of the pairwise
+comparisons:
+
+```{r}
+DE_res %>%
+  group_by(contrast) %>%
+  summarize(`nr of DEGs` = sum(isDE, na.rm = TRUE),
+            `nr tested` = sum(!is.na(padj)),
+            `% DEGs` = round(`nr of DEGs` / `nr tested` * 100, 2)) %>%
+  make_kable()
+```
+
+### Asymmetry in direction of DE for all DEGs
+
+```{r}
+DE_res %>%
+  filter(isDE == TRUE) %>% 
+  group_by(contrast) %>%
+  summarize(`LFC < 0` = sum(log2FoldChange < 0),
+            `LFC > 0` = sum(log2FoldChange > 0),
+            `% LFC < 0` = round((`LFC < 0` / (`LFC > 0` + `LFC < 0`)) * 100, 2)) %>%
+  make_kable()
+```
+
+### Asymmetry in direction of DE for top-50 DEGs
+
+```{r}
+DE_res %>%
+  filter(isDE == TRUE) %>%
+  arrange(padj) %>%
+  group_by(contrast) %>%
+  slice_head(n = 50) %>%
+  summarize(`LFC < 0` = sum(log2FoldChange < 0),
+            `LFC > 0` = sum(log2FoldChange > 0),
+            `% LFC < 0` = round((`LFC < 0` / (`LFC > 0` + `LFC < 0`)) * 100, 2)) %>%
+  make_kable()
+```
+
+### Numbers of very strongly DE genes
+
+```{r}
+DE_res %>%
+  filter(isDE == TRUE) %>%
+  group_by(contrast) %>%
+  summarize(n_lfc_gt5 = sum(abs(log2FoldChange) > 5),
+            n_padj_lt1e5 = sum(padj < 0.0001)) %>%
+  make_kable()
+```
+
+<br>
+
+----
+
+## Venn diagrams of DEG overlap {.tabset .tabset-fade .tabset-pills}
+
+<br>
+
+### All DEGs
+
+Among all significant DEGs for each comparison,
+how many genes overlap?
+
+```{r}
+flist <- list(extract_DEGs(DE_res, compvec[1]),
+              extract_DEGs(DE_res, compvec[2]),
+              extract_DEGs(DE_res, compvec[3]))
+names(flist) <- compvec
+
+ggvenn(flist, fill_color = compcols)
+
+ggsave(plotfile_venn_all, bg = "white", width = 7.5, height = 7.5)
+```
+
+### Top-100 DEGs
+
+Among the top-100 most significant DEGs for each comparison,
+how many genes overlap?
+
+```{r, results='hide'}
+top_n <- 100
+
+flist <- list(extract_DEGs(DE_res, compvec[1], top_n = top_n),
+              extract_DEGs(DE_res, compvec[2], top_n = top_n),
+              extract_DEGs(DE_res, compvec[3], top_n = top_n))
+names(flist) <- compvec
+
+ggvenn(flist, fill_color = compcols)
+```
+
+
+### Top-50 DEGs
+
+Among the top-50 most significant DEGs for each comparison,
+how many genes overlap?
+
+```{r, results='hide'}
+top_n <- 50
+
+flist <- list(extract_DEGs(DE_res, compvec[1], top_n = top_n),
+              extract_DEGs(DE_res, compvec[2], top_n = top_n),
+              extract_DEGs(DE_res, compvec[3], top_n = top_n))
+names(flist) <- compvec
+
+ggvenn(flist, fill_color = compcols)
+
+ggsave(plotfile_venn50, bg = "white", width = 7.5, height = 7.5)
+```
+
+<br>
+
+----
+
+## Top-100 high-expression heatmap
+
+```{r}
+hi_expr <- names(sort(rowSums(counts_raw), decreasing = TRUE)[1:100])
+
+p <- pheat(hi_expr, count_mat, meta,
+      groups = "tissue",
+      show_rownames = FALSE, cluster_rows = FALSE,
+      annotation_colors = tissue_colors_list)
+print(p)
+
+ggsave(plotfile_heat_hiexpr, p)
+```
+
+<br>
+
+----
+
+## Volcano plot {.tabset .tabset-fade .tabset-pills}
+
+```{r}
+p <- pvolc(DE_res, cols = compcols, sig_only = FALSE)
+
+ggsave(plotfile_volc, p, width = 6.5, height = 7)
+```
+
+<br>
+
+----
+
+## Top-50 DEG heatmaps {.tabset .tabset-fade .tabset-pills}
+
+Values displayed by colors are log10-transformed normalized counts.
+
+### Top-50 across all comparisons
+
+```{r}
+fgenes <- unique(c(extract_DEGs(DE_res, compvec[1], top_n = 50),
+                   extract_DEGs(DE_res, compvec[2], top_n = 50),
+                   extract_DEGs(DE_res, compvec[3], top_n = 50)))
+
+p <- pheat(fgenes, count_mat, meta,
+           show_rownames = FALSE, annotation_colors = tissue_colors_list)
+
+print(p)
+
+ggsave(plotfile_heat_top50DE, p, width = 5.5, height = 7)
+```
+
+
+### `r compvec[1]`
+
+```{r}
+fDE <- DE_res %>% filter(contrast == compvec[1], isDE == TRUE)
+fgenes <- fDE$gene_id[1:min(50, nrow(fDE))]
+
+pheat(fgenes, count_mat, meta,
+           show_rownames = FALSE, annotation_colors = tissue_colors_list)
+```
+
+<br>
+
+----
+
+### `r compvec[2]`
+
+```{r}
+fDE <- DE_res %>% filter(contrast == compvec[2], isDE == TRUE)
+fgenes <- fDE$gene_id[1:min(50, nrow(fDE))]
+
+pheat(fgenes, count_mat, meta,
+      show_rownames = FALSE, annotation_colors = tissue_colors_list)
+```
+
+<br>
+
+----
+
+### `r compvec[3]`
+
+```{r}
+fDE <- DE_res %>% filter(contrast == compvec[3], isDE == TRUE)
+fgenes <- fDE$gene_id[1:min(50, nrow(fDE))]
+
+pheat(fgenes, count_mat, meta,
+      show_rownames = FALSE, annotation_colors = tissue_colors_list)
+```
+
+<br>
+
+----
+
+## Top-DE boxplots {.tabset .tabset-fade .tabset-pills}
+
+<br>
+
+### `r compvec[1]`
+
+```{r}
+fDE <- DE_res %>% filter(contrast == compvec[1], isDE == TRUE)
+
+## 4 genes per plot
+p4box(fDE$gene_id[1:4], count_df, annot, tissue_colors, log_scale = TRUE)
+ggsave(plotfile_box, width = 6, height = 6)
+
+## 1 gene per plot
+#walk(DE_fE$gene_id[1:10], pbox, count_df, annot, tissue_colors)
+```
+
+<br>
+
+----
+
+### `r compvec[2]`
+
+```{r}
+fDE <- DE_res %>% filter(contrast == compvec[2], isDE == TRUE)
+
+## 4 genes per plot
+p4box(fDE$gene_id[1:4], count_df, annot, tissue_colors, log_scale = TRUE)
+```
+
+<br>
+
+----
+
+### `r compvec[3]`
+
+```{r}
+fDE <- DE_res %>% filter(contrast == compvec[3], isDE == TRUE)
+
+## 4 genes per plot
+p4box(fDE$gene_id[1:4], count_df, annot, tissue_colors, log_scale = TRUE)
+```
+
+<br>
+
+----
+
+## Gene Ontology
+
+### Summary
+
+```{r}
+GO_res %>%
+  group_by(contrast, DE_direction) %>%
+  summarize(nsig = sum(sig), .groups = "drop") %>%
+  pivot_wider(id_cols = contrast, names_from = DE_direction, values_from = nsig) %>%
+  select(contrast, either, down, up) %>%
+  arrange(contrast) %>% 
+  make_kable()
+```
+
+- Overlap among overrepresented terms `DM+S v. IM` <=> `DM+S v. DM` for upregulated
+  genes:
+
+```{r}
+dm <- GO_res %>% filter(sig == 1, DE_direction == "up", contrast == "DM+S v. IM") %>% pull(category)
+im <- GO_res %>% filter(sig == 1, DE_direction == "up", contrast == "IM+S v. IM") %>% pull(category)
+length(intersect(dm, im))
+
+## Check overlap among sig GO terms for 'either' vs 'up' DE direction
+#flist <- list(
+#  GO_res %>% filter(DE_direction == "either", sig == TRUE, contrast == "IM+S v. IM") %>% pull(category),
+#  GO_res %>% filter(DE_direction == "up", sig == TRUE, contrast == "IM+S v. IM") %>% pull(category)
+#  )
+#names(flist) <- c("either", "up")
+#ggvenn(flist)
+```
+
+### Plot - DE up
+
+Only showing those with `padj < 0.001`,
+since there are too many categories otherwise. 
+
+```{r, fig.height = 10, out.width="80%"}
+enrich_plot(GO_res, contrasts = compvec, DE_directions = "up",
+            padj_tres = 0.001, x_var_levels = compvec,
+            xlabsize = 8, ylabsize = 8)
+
+ggsave(plotfile_go, width = 6, height = 7, bg = "white")
+```
+
+### Plot - DE down
+
+Showing all significant categories.
+
+```{r, fig.height = 10, out.width="80%"}
+enrich_plot(GO_res, contrasts = compvec, DE_directions = "down",
+            x_var_levels = compvec)
+```
+
+<br>
+
+------
+
+## DEG tables {.tabset .tabset-fade .tabset-pills}
+
+```{r}
+degtab_cap <- glue("mean_A / mean_B: mean count in group A / group B")
+```
+
+<br>
+
+### `r compvec[1]`
+
+<br>
+
+```{r}
+DE_res %>%
+  filter(contrast == compvec[1], isDE == TRUE) %>%
+  select(mean_A, mean_B, lfc = log2FoldChange,
+         padj, gene_name, description, gene_id) %>%
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt(caption = degtab_cap)
+```
+
+<br>
+
+----
+
+### `r compvec[2]`
+
+<br>
+
+```{r}
+DE_res %>%
+  filter(contrast == compvec[2], isDE == TRUE) %>%
+  select(mean_A, mean_B, lfc = log2FoldChange,
+         padj, gene_name, description, gene_id) %>%
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt(caption = degtab_cap)
+```
+
+<br>
+
+----
+
+### `r compvec[3]`
+
+<br>
+
+```{r}
+DE_res %>%
+  filter(contrast == compvec[3], isDE == TRUE) %>%
+  select(mean_A, mean_B, lfc = log2FoldChange,
+         padj, gene_name, description, gene_id) %>%
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt(caption = degtab_cap)
+```
+
+<br>
+
+----
+
+### DEGs in all comparisons
+
+The following genes were differentially expressed in all 3 pairwise comparisons
+(the values in the contrast columns are adjusted p-values):
+
+```{r}
+DE_in_all <- DE_res %>%
+  select(isDE, contrast, padj, gene_id, gene_name, description) %>%
+  group_by(gene_id) %>%
+  filter(sum(isDE) == length(compvec)) %>% 
+  pivot_wider(values_from = padj, names_from = contrast) %>%
+  select(-isDE)
+```
+
+```{r}
+DE_in_all %>% 
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt()
+```
+
+<br>
+
+----
+
+### DEGs in 1+ comparisons
+
+```{r}
+DE_combs %>% 
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt()
+```
+
+<br>
+
+-----
+
+## GO tables {.tabset .tabset-fade .tabset-pills}
+
+```{r}
+gotab_cap <- glue("p: raw p-value; padj: adjusted p-value;
+                  numDEInCat: number of DEGs in this GO category;
+                  numInCat: total number of genes in this GO category")
+```
+
+### `r compvec[1]`
+
+<br>
+
+```{r}
+GO_res %>%
+  filter(contrast == compvec[1], sig == 1) %>%
+  make_dt(caption = gotab_cap)
+```
+
+### `r compvec[2]` {.tabset .tabset-fade .tabset-pills}
+
+<br>
+
+```{r}
+GO_res %>%
+  filter(contrast == compvec[2], sig == 1) %>%
+  make_dt(caption = gotab_cap)
+```
+
+### `r compvec[3]` {.tabset .tabset-fade .tabset-pills}
+
+<br>
+
+```{r}
+GO_res %>%
+  filter(contrast == compvec[3], sig == 1) %>%
+  make_dt(caption = gotab_cap)
+```
+
+<br>

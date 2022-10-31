@@ -1,0 +1,238 @@
+---
+title: "_Ambrosia_ RNAseq manuscript: figures"
+date: "`r Sys.Date()`"
+execute: 
+  eval: true
+  echo: false
+  warning: false
+  message: false
+format:
+  docx:
+    fig-align: center
+    fig-format: png
+    fig-dpi: 300
+    fig-width: 6.5
+    fig-height: 6.5
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+```{r}
+## Load packages
+if (!"pacman" %in% installed.packages()) install.packages("pacman")
+if (!"BiocManager" %in% installed.packages()) install.packages("BiocManager")
+if (!"DESeq2" %in% installed.packages()) BiocManager::install("DESeq2")
+packages <- c("tidyverse", "DESeq2",
+              "glue", "here", 
+              "pheatmap", "ggrepel", "ggvenn", "patchwork", 
+              "RColorBrewer", "colorspace",
+              "DT", "kableExtra")
+pacman::p_load(char = packages, install = TRUE)
+```
+
+```{r}
+## Source script with functions
+source(here("scripts/DE_funs.R"))
+source(here("mcic-scripts/rnaseq/rfuns/enrich_funs.R"))
+```
+
+```{r}
+## Define input files
+dds_file <- here("results/DE/dds_insect_preDE.rds")
+DE_file <- here("results/DE/DE_insectgenes.tsv")
+GO_file <- here("results/GO/GO_insectgenes.tsv")
+annot_file <- here("results/trinotate/blast_res.txt")
+```
+
+```{r}
+## Define output files
+plotfile_pca <- here("results/ms_figs/PCA.png")
+plotfile_heat_hiexpr <- here("results/ms_figs/heatmap_hi-expr.png")
+plotfile_venn_all <- here("results/ms_figs/venn_allDE.png")
+plotfile_venn50 <- here("results/ms_figs/venn_top50DE.png")
+plotfile_volc <- here("results/ms_figs/volcano.png")
+plotfile_heat_top50DE <- here("results/ms_figs/heatmap_top50DE.png")
+plotfile_box <- here("results/ms_figs/boxplots.png")
+plotfile_go <- here("results/ms_figs/GO_up.png")
+```
+
+```{r}
+# Settings
+
+## Focal factor
+focal_fct <- "tissue"
+tissue_levels <- c("DM+S", "IM+S", "IM")
+complist <- list(c("DM+S", "IM+S"), c("DM+S", "IM"), c("IM+S", "IM"))
+compvec <- map_chr(complist, function(x) paste0(x, collapse = " v. "))
+
+## Plot settings
+theme_set(theme_bw(base_size = 14))
+
+## Tissue and contrast colors
+tissue_colors <- qualitative_hcl(length(tissue_levels), palette = "Dark 3")
+names(tissue_colors) <- tissue_levels
+compcols <- brewer.pal(length(compvec), name = "Dark2")
+
+## Color list for heatmaps
+tissue_colors_list <- list(tissue_colors)
+names(tissue_colors_list) <- focal_fct
+```
+
+```{r}
+# Load and prepare input data
+
+## Load annotation data
+annot <- read_tsv(annot_file, show_col_types = FALSE)
+
+## Load DESeq object
+dds <- readRDS(dds_file)
+
+## Load DE results
+DE_res <- read_tsv(DE_file, show_col_types = FALSE) %>%
+  mutate(contrast = factor(contrast, levels = compvec))
+
+## Load GO results
+GO_res <- read_tsv(GO_file, show_col_types = FALSE) %>%
+  mutate(contrast = factor(contrast, levels = compvec),
+         description = str_to_title(description))
+
+## Extract metadata
+meta <- colData(dds) %>%
+  as.data.frame() %>%
+  select(-tissue) %>%
+  dplyr::rename(tissue = tissue_plot)
+```
+
+```{r}
+## Get normalized count matrix
+dds <- estimateSizeFactors(dds)
+counts_raw <- dds@assays@data$counts
+count_mat <- sweep(counts_raw, 2, sizeFactors(dds), "/")
+
+## Get a long-format count df with metadata
+count_df <- as.data.frame(count_mat) %>%
+  rownames_to_column("gene_id") %>%
+  pivot_longer(-gene_id, names_to = "id_short", values_to = "count") %>%
+  left_join(meta, by = "id_short")
+
+## Mean counts
+mean_df <- count_df %>%
+  group_by(gene_id, tissue) %>%
+  summarize(mean = mean(count), .groups = "drop") %>%
+  pivot_wider(id_cols = gene_id, values_from = mean,
+              names_from = tissue, names_prefix = "mean_")
+```
+
+```{r}
+## Function to get (top) DEGs
+extract_DEGs <- function(DE_res, fcontrast, top_n = Inf) {
+  filter(DE_res, contrast == fcontrast, isDE == TRUE) %>%
+    arrange(padj) %>% 
+    pull(gene_id) %>%
+    head(top_n)
+}
+```
+
+```{r}
+#| fig-height: 4
+#| label: pca
+#| fig-cap: "Fig. 1: Principal Component Analysis of gene expression patterns among the three tissues. All three tissues are distinct, with the largest difference between IM and the other two tissues."
+pca_res <- plotPCA(varianceStabilizingTransformation(dds, blind = TRUE),
+                   intgroup = "tissue_plot", returnData = TRUE)
+pct_var <- round(100 * attr(pca_res, "percentVar"), 2)
+
+p_pca <- ggplot(pca_res) +
+  aes(x = PC1, y = PC2, fill = tissue_plot) +
+  geom_point(size = 5, shape = 21, color = "grey20") +
+  scale_fill_manual(values = tissue_colors) +
+  labs(fill = "tissue",
+       x = paste0("PC1: ", pct_var[1], "% of variance"),
+       y = paste0("PC2: ", pct_var[2], "% of variance")) +
+  theme(aspect.ratio = pct_var[2] / pct_var[1],
+        panel.grid.minor = element_blank(),
+        legend.position = "top")
+
+print(p_pca)
+```
+
+\newpage
+
+```{r}
+flist <- list(extract_DEGs(DE_res, compvec[1]),
+              extract_DEGs(DE_res, compvec[2]),
+              extract_DEGs(DE_res, compvec[3]))
+names(flist) <- compvec
+
+venn_all <- ggvenn(flist, fill_color = compcols,
+                   text_size = 2.5, set_name_size = 4)
+```
+
+```{r, results='hide'}
+flist <- list(extract_DEGs(DE_res, compvec[1], top_n = 50),
+              extract_DEGs(DE_res, compvec[2], top_n = 50),
+              extract_DEGs(DE_res, compvec[3], top_n = 50))
+names(flist) <- compvec
+
+venn_top <- ggvenn(flist, fill_color = compcols,
+                   text_size = 2.5, set_name_size = 4)
+```
+
+```{r}
+#| fig-height: 8
+#| fig-cap: "Fig. 2: Venn Diagram of overlap among (A) all DEGs and (B) the top-50 DEGs per comparison. Especially among top-DEGs, many genes are shared across comparisons."
+venn_all / venn_top +
+  plot_annotation(tag_levels = 'A')
+```
+
+\newpage
+
+```{r}
+#| fig-cap: "Fig. 3: Heatmap of expression levels of the 61 genes that are among the top-50 DEG in one or more of the three tissue comparisons. In the large majority of these genes, the expression level in DM+S is lowest, that in IM+S is intermediate, and highest in IM. Genes are clustered and ordered by expression pattern similarity, not the strength/significance of DE. The color of each cell represents the log10-transformed expression level for one gene in one sample."
+fgenes <- unique(c(extract_DEGs(DE_res, compvec[1], top_n = 50),
+                   extract_DEGs(DE_res, compvec[2], top_n = 50),
+                   extract_DEGs(DE_res, compvec[3], top_n = 50)))
+
+p_heat <- pheat(fgenes, count_mat, meta,
+                show_rownames = FALSE, annotation_colors = tissue_colors_list)
+print(p_heat)
+```
+
+\newpage
+
+```{r}
+#| fig-cap: "Fig. 4: Volcano plots of differential expression patterns in the three tissue comparisons. Non-significant genes are in gray, whereas significant genes (DEGs) have tissue-specific colors. A negative log-fold change indicates that the expression level of the second group (e.g. IM+S in the leftmost panel) is higher than that in the second group (DM+S in the leftmost panel)."
+p_volc <- pvolc(DE_res, cols = compcols, sig_only = FALSE)
+```
+
+\newpage
+
+```{r}
+#| fig-cap: "Fig. 5: Boxplot showing the expression levels of select genes across tissues. NOTE: THESE SPECIFIC GENES ARE MEANT AS AN EXAMPLE, SHOULD REPLACE BY INTERESTING GENES."
+fDE <- DE_res %>% filter(contrast == compvec[1], isDE == TRUE)
+
+p_box <- p4box(fDE$gene_id[1:4], count_df, annot, tissue_colors, log_scale = TRUE)
+```
+
+\newpage
+
+```{r}
+#| fig-cap: "Fig. 6: Overrepresented GO terms among DEGs with higher expression levels in the second-listed tissue (e.g., higher in IM in the second and third column). Only GO terms with an adjusted p-value below 0.001 are shown. Grey boxes mean that the term was not significantly overrepresented. For colored boxes, the color shows the -log10 of the adjusted p-value, with higher values indicating a lower p-value, and the numbers in the boxes represent the number of DEGs for the focal term. Terms are separated into the three main GO term groups: Biological Process (BP), Cellular Component (CC), and Molecular Function (MF)."
+p_go <- enrich_plot(GO_res, contrasts = compvec, DE_directions = "up",
+                    padj_tres = 0.001, x_var_levels = compvec,
+                    xlabsize = 8, ylabsize = 8)
+```
+
+```{r}
+## Save figures separately
+ggsave(plotfile_pca, p_pca, width = 7, height = 4)
+ggsave(plotfile_venn_all, venn_all, bg = "white", width = 7.5, height = 7.5)
+ggsave(plotfile_venn50, venn_top, bg = "white", width = 7.5, height = 7.5)
+ggsave(plotfile_heat_top50DE, p_heat, width = 5.5, height = 7)
+ggsave(plotfile_volc, p_volc, width = 6.5, height = 7)
+ggsave(plotfile_box, p_box, width = 6, height = 6)
+ggsave(plotfile_go, p_go, width = 6, height = 7, bg = "white")
+```

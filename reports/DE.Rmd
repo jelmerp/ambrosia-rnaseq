@@ -49,8 +49,7 @@ lfc_tres <- 0.5
 
 ```{r}
 #TODO - USE LFC-THRESHOLD WITH S-VALUE? (USED S-VAL THRESHOLD OF 0.005 W/ RANJANA)
-#TODO - GO - VERY MANY GO CATS PER GENE...
-#TODO - GO - MISSING GENE LENGTHS!
+#TODO - GO - MISSING GENE LENGTHS FOR MANY GENES!
 ```
 
 ```{r}
@@ -132,6 +131,13 @@ count_df <- as.data.frame(count_mat) %>%
   pivot_longer(-gene_id, names_to = "id_short", values_to = "count") %>%
   left_join(meta, by = "id_short")
 
+## Mean counts
+mean_df <- count_df %>%
+  group_by(gene_id, tissue) %>%
+  summarize(mean = mean(count)) %>%
+  pivot_wider(id_cols = gene_id, values_from = mean,
+              names_from = tissue, names_prefix = "mean_")
+
 ## Gene lengths and GO map for GO analysis
 GO_map <- read_tsv(GO_map_file) %>% as.data.frame()     # goseq fails with a tibble
 gene_lens <- read_tsv(gene_len_file)
@@ -160,6 +166,20 @@ DE <- map_dfr(.x = complist, .f = get_DE,
 
 ## Shrunken LFC values + LFC test
 # DE_shrink <- map_dfr(complist, shrink_lfc, dds = dds, fac = "tissue")
+```
+
+```{r}
+DE_combs <- DE %>%
+  filter(isDE == TRUE) %>% 
+  select(gene_id, lfc, padj, contrast, gene_name, description) %>%
+  left_join(mean_df, by = "gene_id") %>%
+  pivot_wider(values_from = c(padj, lfc), names_from = contrast)
+```
+
+```{r}
+## Color list for heatmaps
+fac_col_list <- list(fac_cols)
+names(fac_col_list) <- "tissue"
 ```
 
 <br>
@@ -279,6 +299,61 @@ ggplot(pca_res) +
 
 ----
 
+## Highly expressed genes
+
+### Heatmap of top-100 highly expressed
+
+Here, genes are not clustered by overall expression pattern similarity
+like in the other heatmaps, but just sorted by overall abundance.
+
+```{r}
+hi_expr <- names(sort(rowSums(counts_raw), decreasing = TRUE)[1:100])
+```
+
+```{r}
+pheat(hi_expr, count_mat, meta,
+      groups = "tissue",
+      show_rownames = FALSE, cluster_rows = FALSE,
+      annotation_colors = fac_col_list)
+```
+
+### Genes expressed in all tissues
+
+- **Only includes genes with a count of at least 100 in each sample**
+
+- Empty cells in the `padj` and `lfc` columns means that the gene wasn't DE in
+  any of the comparisons.
+
+<br>
+
+```{r}
+hi_expr_ids <- count_mat %>%
+  as.data.frame() %>%
+  rownames_to_column("gene_id") %>%
+  filter(if_all(everything(), ~ .x > 100)) %>%
+  pull(gene_id)
+
+hi_exp_df <- mean_df %>%
+  filter(gene_id %in% hi_expr_ids) %>%
+  left_join(annot %>% select(gene_id, gene_name, description), by = "gene_id") %>%
+  left_join(DE_combs %>% select(gene_id, contains("padj_"), contains("lfc_")),
+            by = "gene_id") %>%
+  mutate(mean_all = (mean_EMySc + mean_FMy + mean_FMySc) / 3) %>%
+  relocate(mean_all, .after = gene_id) %>%
+  arrange(-mean_all)
+
+```
+
+```{r}
+hi_exp_df %>% 
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt()
+```
+
+<br>
+
+----
+
 ## DEG tables {.tabset .tabset-fade .tabset-pills}
 
 ```{r}
@@ -370,6 +445,18 @@ DE_in_all %>%
 
 ----
 
+### DEGs in 1+ comparisons
+
+```{r}
+DE_combs %>% 
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt()
+```
+
+<br>
+
+----
+
 ## Volcano plots {.tabset .tabset-fade .tabset-pills}
 
 ### Static plot
@@ -416,35 +503,11 @@ if (nrow(DE) >= 100000) cat("Too many genes for an interactive plot.\n")
 
 ----
 
-## Heatmaps
-
-```{r}
-## Color list for heatmaps
-fac_col_list <- list(fac_cols)
-names(fac_col_list) <- "tissue"
-```
+## Top-100 DEG heatmaps {.tabset .tabset-fade .tabset-pills}
 
 Values displayed by colors are log10-transformed normalized counts.
 
-### Top-100 most highly expressed genes
-
-Here, genes are not clustered by overall expression pattern similarity
-like in the other heatmaps, but just sorted by overall abundance.
-
-```{r}
-hi_expr <- names(sort(rowSums(counts_raw), decreasing = TRUE)[1:100])
-```
-
-```{r}
-pheat(hi_expr, count_mat, meta,
-      groups = "tissue",
-      show_rownames = FALSE, cluster_rows = FALSE,
-      annotation_colors = fac_col_list)
-```
-
-### Top-100 DEGs {.tabset .tabset-fade .tabset-pills}
-
-#### `r compvec[1]`
+### `r compvec[1]`
 
 ```{r}
 fDE <- DE %>% filter(contrast == compvec[1], isDE == TRUE)
@@ -460,7 +523,7 @@ pheat(fgenes, count_mat, meta,
 
 ----
 
-#### `r compvec[2]`
+### `r compvec[2]`
 
 ```{r}
 fDE <- DE %>% filter(contrast == compvec[2], isDE == TRUE)
@@ -476,7 +539,7 @@ pheat(fgenes, count_mat, meta,
 
 ----
 
-#### `r compvec[3]`
+### `r compvec[3]`
 
 ```{r}
 fDE <- DE %>% filter(contrast == compvec[3], isDE == TRUE)
@@ -549,6 +612,88 @@ fDE <- DE %>% filter(contrast == compvec[3], isDE == TRUE)
 p4box(fDE$gene_id[1:4], count_df, annot, fac_cols)
 p4box(fDE$gene_id[5:8], count_df, annot, fac_cols)
 p4box(fDE$gene_id[9:12], count_df, annot, fac_cols)
+```
+
+<br>
+
+----
+
+## 'Exclusively' expressed genes {.tabset .tabset-fade .tabset-pills}
+
+Truly exclusively expressed genes, i.e. genes only expressed in one tissue,
+**were not found**, though a couple of genes with `FMy` as the focal tissue come
+pretty close.
+
+Genes were filtered based on the following criteria:
+
+- Expression in the focal tissue had to be significantly higher than in
+  both other tissues.
+  
+- Mean expression level in each of the two other tissues had to be below a
+  threshold. I varied this based on the tissue (`100` for `EMySC` and `FMySc`,
+  and `10` for `Fmy`) -- I think `10` is more reasonable but that resulted in very
+  few or no genes for `EMySC` and `FMySc`.
+
+### EMySc only
+
+```{r}
+only <- DE_combs %>%
+  filter(`padj_FMy v. EMySc` < 0.05,
+         `padj_EMySc v. FMySc` < 0.05,
+         `lfc_FMy v. EMySc` < 0,
+         `lfc_EMySc v. FMySc` > 0) %>%
+  filter(mean_FMy < 100, mean_FMySc < 100) %>%
+  arrange(-mean_EMySc)
+```
+
+```{r}
+only %>% 
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt()
+```
+
+<br>
+
+----
+
+### FMySc only
+
+```{r}
+only <- DE_combs %>%
+  filter(`padj_EMySc v. FMySc` < 0.05,
+         `padj_FMy v. FMySc` < 0.05,
+         `lfc_FMy v. FMySc` < 0,
+         `lfc_EMySc v. FMySc` < 0) %>%
+  filter(mean_FMy < 100, mean_EMySc < 100) %>%
+  arrange(-mean_FMySc)
+```
+
+```{r}
+only %>% 
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt()
+```
+
+<br>
+
+----
+
+### FMy only
+
+```{r}
+only <- DE_combs %>%
+  filter(`padj_FMy v. EMySc` < 0.05,
+         `padj_FMy v. FMySc` < 0.05,
+         `lfc_FMy v. EMySc` > 0,
+         `lfc_FMy v. FMySc` > 0) %>%
+  filter(mean_FMySc < 10, mean_EMySc < 10) %>%
+  arrange(-mean_FMy)
+```
+
+```{r}
+only %>% 
+  mutate(description = str_trunc(description, width = 60)) %>% 
+  make_dt()
 ```
 
 <br>
